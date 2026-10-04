@@ -73,7 +73,6 @@ export function AnalysisView({ attemptId }: { attemptId: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          apiKey: settings.geminiApiKey,
           model: settings.geminiModel,
           images,
           prompt: `Explain this imported JEE question. The deterministic evaluation is the source of truth.
