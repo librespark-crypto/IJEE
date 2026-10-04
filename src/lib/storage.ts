@@ -17,7 +17,6 @@ const DB_NAME = "fjee";
 const DB_VERSION = 1;
 
 export const defaultSettings: Settings = {
-  geminiApiKey: "",
   geminiModel: "gemini-2.5-flash",
   numbering: "cumulative",
   realExamSave: false,
@@ -109,8 +108,16 @@ export async function saveProgress(progress: TopicProgress) {
 }
 
 export async function getSettings(): Promise<Settings> {
-  const row = await (await db()).get("settings", "app");
-  return row ? { ...defaultSettings, ...row } : defaultSettings;
+  const database = await db();
+  const row = await database.get("settings", "app");
+  if (!row) return { ...defaultSettings };
+
+  // Clear API keys saved by older versions of this browser-first settings panel.
+  const legacyRow = row as SettingsRecord & { geminiApiKey?: string };
+  const { id, geminiApiKey, ...stored } = legacyRow;
+  const settings = { ...defaultSettings, ...stored };
+  if (geminiApiKey !== undefined) await database.put("settings", { ...settings, id: "app" });
+  return settings;
 }
 
 export async function saveSettings(settings: Settings) {
@@ -147,7 +154,12 @@ export async function exportBackup() {
       data: await image.blob.arrayBuffer(),
     })),
   );
-  return { version: 1, exportedAt: Date.now(), tests, attempts, progress, settings, chats, images: imagePayload };
+  const safeSettings = settings.map((item) => {
+    const legacyItem = item as SettingsRecord & { geminiApiKey?: string };
+    const { geminiApiKey: _legacyKey, ...safeItem } = legacyItem;
+    return safeItem;
+  });
+  return { version: 1, exportedAt: Date.now(), tests, attempts, progress, settings: safeSettings, chats, images: imagePayload };
 }
 
 export async function importBackup(payload: {
@@ -163,7 +175,11 @@ export async function importBackup(payload: {
   for (const test of payload.tests ?? []) await tx.objectStore("tests").put(test);
   for (const attempt of payload.attempts ?? []) await tx.objectStore("attempts").put(attempt);
   for (const item of payload.progress ?? []) await tx.objectStore("progress").put(item);
-  for (const item of payload.settings ?? []) await tx.objectStore("settings").put(item);
+  for (const item of payload.settings ?? []) {
+    const legacyItem = item as SettingsRecord & { geminiApiKey?: string };
+    const { geminiApiKey: _legacyKey, ...safeItem } = legacyItem;
+    await tx.objectStore("settings").put(safeItem);
+  }
   for (const chat of payload.chats ?? []) await tx.objectStore("chats").put(chat);
   for (const image of payload.images ?? []) {
     await tx.objectStore("images").put({

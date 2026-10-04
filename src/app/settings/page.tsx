@@ -1,25 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useStore } from "@/components/store";
 import { exportBackup, importBackup } from "@/lib/storage";
 import type { NumberingMode } from "@/lib/types";
 
 export default function SettingsPage() {
   const { settings, putSettings, wipe } = useStore();
-  const [key, setKey] = useState(settings.geminiApiKey);
   const [notice, setNotice] = useState("");
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-    if (key !== settings.geminiApiKey) setKey(settings.geminiApiKey);
-    }, 0);
-    return () => clearTimeout(timeout);
-  }, [settings.geminiApiKey]);
-
-  async function save() {
-    await putSettings({ ...settings, geminiApiKey: key.trim() });
-    setNotice("Saved on this browser. The key is not written to the database.");
-  }
 
   async function download() {
     const payload = await exportBackup();
@@ -40,45 +28,47 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mx-auto w-full max-w-3xl min-w-0 px-4 py-8">
       <p className="font-note text-2xl">The margin notes</p>
       <h1 className="font-display text-5xl">Settings</h1>
-      <section className="manga-panel mt-6 p-4">
+      <section className="manga-panel mt-6 min-w-0 p-4">
         <h2 className="font-display text-3xl">Gemini</h2>
-        <p className="mt-2 text-sm leading-6">Optional. Stored locally. Sent only to the tutor route on this app, which calls Google. Scoring never uses it. If the server has GEMINI_API_KEY, that is used when this field is empty.</p>
-        <input className="mt-3 w-full border-2 border-[var(--ink)] bg-white px-3 py-2" type="password" value={key} placeholder="Gemini API key" onChange={(event) => setKey(event.target.value)} />
+        <p className="mt-2 max-w-full text-sm leading-6">
+          Gemini access is server-side only. To enable the tutor, the site operator sets <code>GEMINI_API_KEY</code> as a server environment variable (for example, in Vercel Project Settings). The key is not stored in this browser, sent from the browser, or included in backups. Scoring never uses Gemini.
+        </p>
         <label className="mt-3 block text-sm">Model
-          <input className="mt-1 w-full border-2 border-[var(--ink)] bg-white px-3 py-2" value={settings.geminiModel} onChange={(event) => void putSettings({ ...settings, geminiModel: event.target.value })} />
+          <input
+            className="mt-1 min-h-11 w-full min-w-0 border-2 border-[var(--ink)] bg-white px-3 py-2"
+            value={settings.geminiModel}
+            onChange={(event) => void putSettings({ ...settings, geminiModel: event.target.value })}
+            aria-label="Gemini model"
+          />
         </label>
-        <div className="mt-3 flex gap-2">
-          <button className="bg-[var(--ink)] px-4 py-2 text-white" onClick={() => void save()}>Save key</button>
-          <button className="border-2 border-[var(--ink)] px-4 py-2" onClick={() => { setKey(""); void putSettings({ ...settings, geminiApiKey: "" }); }}>Clear key</button>
-        </div>
       </section>
-      <section className="manga-panel mt-4 p-4">
+      <section className="manga-panel mt-4 min-w-0 p-4">
         <h2 className="font-display text-3xl">Exam defaults</h2>
         <label className="mt-3 block text-sm">Question numbering
-          <select className="mt-1 w-full border-2 border-[var(--ink)] bg-white px-3 py-2" value={settings.numbering} onChange={(event) => void putSettings({ ...settings, numbering: event.target.value as NumberingMode })}>
+          <select className="mt-1 min-h-11 w-full min-w-0 border-2 border-[var(--ink)] bg-white px-3 py-2" value={settings.numbering} onChange={(event) => void putSettings({ ...settings, numbering: event.target.value as NumberingMode })}>
             <option value="original">Original numbers from the ZIP</option>
             <option value="cumulative">Cumulative 1…N</option>
             <option value="section-wise">Restart in each section</option>
           </select>
         </label>
-        <label className="mt-3 flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={settings.realExamSave} onChange={(event) => void putSettings({ ...settings, realExamSave: event.target.checked })} />
-          Real-exam save: an option is scored only after Save & Next or Mark for Review. Off means every selection is saved immediately.
+        <label className="mt-3 flex min-w-0 items-start gap-2 text-sm">
+          <input className="mt-1 shrink-0" type="checkbox" checked={settings.realExamSave} onChange={(event) => void putSettings({ ...settings, realExamSave: event.target.checked })} />
+          <span>Real-exam save: an option is scored only after Save &amp; Next or Mark for Review. Off means every selection is saved immediately.</span>
         </label>
       </section>
-      <section className="manga-panel mt-4 p-4">
+      <section className="manga-panel mt-4 min-w-0 p-4">
         <h2 className="font-display text-3xl">This browser</h2>
-        <p className="mt-2 text-sm">Export includes papers, images, attempts, syllabus progress and settings. Import restores them after a refresh.</p>
+        <p className="mt-2 text-sm">Export includes papers, images, attempts, syllabus progress and settings. Any Gemini key left by an older version is removed and never exported. Import restores them after a refresh.</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <button className="border-2 border-[var(--ink)] px-4 py-2" onClick={() => void download()}>Export backup</button>
-          <label className="border-2 border-[var(--ink)] px-4 py-2">Import backup<input className="hidden" type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void restore(file); }} /></label>
-          <button className="border-2 border-[var(--vermilion)] px-4 py-2" onClick={() => { if (confirm("Erase every local FJEE paper, attempt and syllabus note on this browser?")) void wipe(); }}>Erase local data</button>
+          <button className="min-h-11 border-2 border-[var(--ink)] px-4 py-2" onClick={() => void download()}>Export backup</button>
+          <label className="inline-flex min-h-11 cursor-pointer items-center border-2 border-[var(--ink)] px-4 py-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--indigo)]">Import backup<input className="sr-only" type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void restore(file); }} /></label>
+          <button className="min-h-11 border-2 border-[var(--vermilion)] px-4 py-2" onClick={() => { if (confirm("Erase every local FJEE paper, attempt and syllabus note on this browser?")) void wipe(); }}>Erase local data</button>
         </div>
       </section>
-      {notice ? <p className="mt-4 text-sm">{notice}</p> : null}
+      {notice ? <p className="mt-4 text-sm" role="status">{notice}</p> : null}
     </div>
   );
 }

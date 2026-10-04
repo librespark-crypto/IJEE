@@ -208,7 +208,6 @@ export type Attempt = {
 };
 
 export type Settings = {
-  geminiApiKey: string;
   geminiModel: string;
   numbering: NumberingMode;
   realExamSave: boolean;

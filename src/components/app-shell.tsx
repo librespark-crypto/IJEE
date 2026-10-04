@@ -20,9 +20,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   if (pathname.startsWith("/exam")) return <>{children}</>;
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b-[3px] border-[var(--ink)] bg-[#fffaf3]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+    <div className="min-h-screen min-w-0">
+      <header className="sticky top-0 z-30 min-w-0 border-b-[3px] border-[var(--ink)] bg-[#fffaf3]/95 backdrop-blur">
+        <div className="mx-auto flex min-w-0 max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <Link href="/" className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center border-[3px] border-[var(--ink)] bg-[var(--vermilion)] font-display text-lg text-white">FJ</span>
             <span>
@@ -41,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={path}
                 href={path}
                 className={cx(
-                  "shrink-0 border-2 border-[var(--ink)] px-3 py-1.5 text-sm font-semibold",
+                  "min-h-11 shrink-0 border-2 border-[var(--ink)] px-3 py-1.5 text-sm font-semibold",
                   active ? "bg-[var(--ink)] text-[#fffaf3]" : "bg-white hover:bg-[#f6efe4]",
                 )}
               >
@@ -51,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
       </header>
-      <main>{children}</main>
+      <main className="min-w-0">{children}</main>
     </div>
   );
 }

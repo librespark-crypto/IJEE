@@ -10,7 +10,6 @@ type Part = { text: string } | { inlineData: { mimeType: string; data: string } 
 
 export async function POST(request: Request) {
   let body: {
-    apiKey?: string;
     model?: string;
     prompt?: string;
     history?: { role: "user" | "assistant"; content: string }[];
@@ -21,9 +20,12 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
-  const apiKey = body.apiKey?.trim() || process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
-    return NextResponse.json({ error: "Add a Gemini API key in Settings. Scoring does not need it." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Gemini is not configured for this deployment. The site operator must set GEMINI_API_KEY on the server." },
+      { status: 503 },
+    );
   }
   const prompt = (body.prompt ?? "").slice(0, 24000);
   if (!prompt.trim()) return NextResponse.json({ error: "Empty prompt." }, { status: 400 });
