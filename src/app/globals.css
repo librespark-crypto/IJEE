@@ -51,8 +51,23 @@ form {
   min-width: 0;
 }
 
+/*
+ * Keep form controls and links on the surrounding theme by default, but put
+ * the color reset in Tailwind's base layer. An unlayered `color: inherit`
+ * overrides layered `text-white` utilities in Tailwind v4, which made every
+ * dark link/button inherit the page's dark ink color.
+ */
+@layer base {
+  a,
+  button,
+  input,
+  select,
+  textarea {
+    color: inherit;
+  }
+}
+
 a {
-  color: inherit;
   text-decoration: none;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -65,7 +80,6 @@ textarea {
   max-width: 100%;
   box-sizing: border-box;
   font: inherit;
-  color: inherit;
 }
 
 textarea {
