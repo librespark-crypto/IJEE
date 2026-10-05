@@ -293,10 +293,10 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
           <div className="flex items-center gap-2">
             <button className="border border-white/40 px-3 py-1 text-sm" onClick={() => setPaletteOpen((open) => !open)}>Palette</button>
             <button className="border border-white/40 px-3 py-1 text-sm" onClick={toggleFullscreen}>Fullscreen</button>
-            <button className="bg-[#d6452f] px-3 py-1 text-sm font-semibold" onClick={() => setConfirmOpen(true)}>Submit</button>
+            <button className="bg-[#d6452f] px-3 py-1 text-sm font-semibold text-white" onClick={() => setConfirmOpen(true)}>Submit</button>
           </div>
         </div>
-        <div className="flex gap-1 overflow-x-auto bg-[#0c325e] px-3 py-2">
+        <div className="flex gap-1 overflow-x-auto bg-[#0c325e] px-3 py-2 text-white">
           {test.sections.map((item) => (
             <button
               key={`${item.subject}-${item.name}`}

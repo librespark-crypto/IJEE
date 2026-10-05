@@ -42,7 +42,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 href={path}
                 className={cx(
                   "min-h-11 shrink-0 border-2 border-[var(--ink)] px-3 py-1.5 text-sm font-semibold",
-                  active ? "bg-[var(--ink)] text-[#fffaf3]" : "bg-white hover:bg-[#f6efe4]",
+                  active ? "bg-[var(--ink)] text-white" : "bg-white text-[var(--ink)] hover:bg-[#f6efe4]",
                 )}
               >
                 {label}
