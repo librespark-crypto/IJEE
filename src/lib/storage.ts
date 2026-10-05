@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Attempt, ChatThread, Settings, StoredTest, TopicProgress } from "./types";
+import { normalizeAttempt, normalizeStoredTest } from "./question-normalizer";
 
 type ImageRecord = { id: string; testId: string; blob: Blob };
 type SettingsRecord = Settings & { id: "app" };
@@ -44,18 +45,37 @@ function db() {
   return database;
 }
 
+function sameRecord(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export async function listTests() {
-  return (await db()).getAll("tests");
+  const database = await db();
+  const rows = await database.getAll("tests");
+  const normalized = rows.map(normalizeStoredTest);
+  const updates = normalized.filter((test, index) => !sameRecord(test, rows[index]));
+  if (updates.length) {
+    const tx = database.transaction("tests", "readwrite");
+    for (const test of updates) await tx.store.put(test);
+    await tx.done;
+  }
+  return normalized;
 }
 
 export async function getTest(id: string) {
-  return (await db()).get("tests", id);
+  const database = await db();
+  const row = await database.get("tests", id);
+  if (!row) return undefined;
+  const test = normalizeStoredTest(row);
+  if (!sameRecord(row, test)) await database.put("tests", test);
+  return test;
 }
 
 export async function saveTest(test: StoredTest, images: { id: string; blob: Blob }[] = []) {
   const database = await db();
+  const normalizedTest = normalizeStoredTest(test);
   const tx = database.transaction(["tests", "images"], "readwrite");
-  await tx.objectStore("tests").put(test);
+  await tx.objectStore("tests").put(normalizedTest);
   for (const image of images) {
     await tx.objectStore("images").put({ id: image.id, testId: test.id, blob: image.blob });
   }
@@ -84,15 +104,29 @@ export async function getImages(ids: string[]) {
 }
 
 export async function listAttempts() {
-  return (await db()).getAll("attempts");
+  const database = await db();
+  const rows = await database.getAll("attempts");
+  const normalized = rows.map(normalizeAttempt);
+  const updates = normalized.filter((attempt, index) => !sameRecord(attempt, rows[index]));
+  if (updates.length) {
+    const tx = database.transaction("attempts", "readwrite");
+    for (const attempt of updates) await tx.store.put(attempt);
+    await tx.done;
+  }
+  return normalized;
 }
 
 export async function getAttempt(id: string) {
-  return (await db()).get("attempts", id);
+  const database = await db();
+  const row = await database.get("attempts", id);
+  if (!row) return undefined;
+  const attempt = normalizeAttempt(row);
+  if (!sameRecord(row, attempt)) await database.put("attempts", attempt);
+  return attempt;
 }
 
 export async function saveAttempt(attempt: Attempt) {
-  await (await db()).put("attempts", attempt);
+  await (await db()).put("attempts", normalizeAttempt(attempt));
 }
 
 export async function deleteAttempt(id: string) {
@@ -159,7 +193,16 @@ export async function exportBackup() {
     const { geminiApiKey: _legacyKey, ...safeItem } = legacyItem;
     return safeItem;
   });
-  return { version: 1, exportedAt: Date.now(), tests, attempts, progress, settings: safeSettings, chats, images: imagePayload };
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    tests: tests.map(normalizeStoredTest),
+    attempts: attempts.map(normalizeAttempt),
+    progress,
+    settings: safeSettings,
+    chats,
+    images: imagePayload,
+  };
 }
 
 export async function importBackup(payload: {
@@ -172,8 +215,8 @@ export async function importBackup(payload: {
 }) {
   const database = await db();
   const tx = database.transaction(["tests", "images", "attempts", "progress", "settings", "chats"], "readwrite");
-  for (const test of payload.tests ?? []) await tx.objectStore("tests").put(test);
-  for (const attempt of payload.attempts ?? []) await tx.objectStore("attempts").put(attempt);
+  for (const test of payload.tests ?? []) await tx.objectStore("tests").put(normalizeStoredTest(test));
+  for (const attempt of payload.attempts ?? []) await tx.objectStore("attempts").put(normalizeAttempt(attempt));
   for (const item of payload.progress ?? []) await tx.objectStore("progress").put(item);
   for (const item of payload.settings ?? []) {
     const legacyItem = item as SettingsRecord & { geminiApiKey?: string };

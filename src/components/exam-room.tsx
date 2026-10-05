@@ -2,8 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { answerIsEmpty, cx, formatClock, markingText, optionLabel, typeLabel } from "@/lib/format";
-import { orderedQuestions, submitAttempt, visibleAnswer } from "@/lib/attempt";
+import { cx, formatClock, markingText, optionLabel, typeLabel } from "@/lib/format";
+import {
+  clearAttemptAnswer,
+  commitQuestion,
+  navigateAttempt,
+  orderedQuestions,
+  setAttemptAnswer,
+  submitAttempt,
+  toggleChoiceAnswer,
+  visibleAnswer,
+} from "@/lib/attempt";
 import { getAttempt, getImages, getTest } from "@/lib/storage";
 import type { Attempt, Question, StoredTest, UserAnswer } from "@/lib/types";
 import { useStore } from "./store";
@@ -87,9 +96,7 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
   }, [attempt?.id, attempt?.status]);
 
   useEffect(() => {
-    if (!attempt) return;
-    const id = window.setTimeout(() => void putAttempt(attempt), 350);
-    return () => window.clearTimeout(id);
+    if (attempt) void putAttempt(attempt);
   }, [attempt, putAttempt]);
 
   const questions = useMemo(() => (test ? orderedQuestions(test) : []), [test]);
@@ -114,7 +121,7 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
         markAndNext();
       } else if (!typing && event.key.toLowerCase() === "f") {
         toggleFullscreen();
-      } else if (!typing && /^[1-9]$/.test(event.key) && (current.type === "mcq" || current.type === "msq")) {
+      } else if (!typing && /^[1-9]$/.test(event.key) && ["single_correct", "multiple_correct", "objective"].includes(current.type)) {
         toggleOption(Number(event.key));
       }
     }
@@ -126,33 +133,8 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
     setAttempt((currentAttempt) => (currentAttempt ? updater(currentAttempt) : currentAttempt));
   }
 
-  function flush(currentAttempt: Attempt, now = Date.now()) {
-    const open = currentAttempt.responses[currentAttempt.currentQuestionId];
-    if (!open) return currentAttempt;
-    const elapsed = Math.max(0, Math.round((now - currentAttempt.questionOpenedAt) / 1000));
-    return {
-      ...currentAttempt,
-      questionOpenedAt: now,
-      updatedAt: now,
-      responses: {
-        ...currentAttempt.responses,
-        [open.questionId]: { ...open, timeSpent: open.timeSpent + elapsed },
-      },
-    };
-  }
-
   function goTo(id: string) {
-    patch((currentAttempt) => {
-      const flushed = flush(currentAttempt);
-      const next = flushed.responses[id];
-      if (!next) return flushed;
-      const status = next.status === "notVisited" ? "notAnswered" : next.status;
-      return {
-        ...flushed,
-        currentQuestionId: id,
-        responses: { ...flushed.responses, [id]: { ...next, status } },
-      };
-    });
+    patch((currentAttempt) => navigateAttempt(currentAttempt, id));
     setZoom(1);
   }
 
@@ -163,58 +145,13 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
 
   function writeAnswer(next: UserAnswer | null) {
     if (!current) return;
-    patch((currentAttempt) => {
-      const response = currentAttempt.responses[current.id];
-      if (!response) return currentAttempt;
-      if (currentAttempt.realExamSave) {
-        return {
-          ...currentAttempt,
-          updatedAt: Date.now(),
-          responses: { ...currentAttempt.responses, [current.id]: { ...response, pending: next } },
-        };
-      }
-      const empty = answerIsEmpty(current.type, next);
-      const marked = response.status === "marked" || response.status === "markedAnswered";
-      const status = empty ? (marked ? "marked" : "notAnswered") : marked ? "markedAnswered" : "answered";
-      return {
-        ...currentAttempt,
-        updatedAt: Date.now(),
-        responses: {
-          ...currentAttempt.responses,
-          [current.id]: { ...response, answer: next, pending: next, status },
-        },
-      };
-    });
+    patch((currentAttempt) => setAttemptAnswer(currentAttempt, current.id, current.type, next));
   }
 
   function commit(mode: "save" | "mark") {
     if (!current || !attempt) return;
-    patch((currentAttempt) => {
-      const flushed = flush(currentAttempt);
-      const response = flushed.responses[current.id];
-      if (!response) return flushed;
-      const chosen = currentAttempt.realExamSave ? response.pending ?? response.answer : response.answer;
-      const empty = answerIsEmpty(current.type, chosen);
-      const status = mode === "mark" ? (empty ? "marked" : "markedAnswered") : empty ? "notAnswered" : "answered";
-      const updated: Attempt = {
-        ...flushed,
-        responses: {
-          ...flushed.responses,
-          [current.id]: { ...response, answer: empty ? null : chosen, pending: empty ? null : chosen, status },
-        },
-      };
-      const next = questions[index + 1];
-      if (!next) return updated;
-      const nextResponse = updated.responses[next.id];
-      return {
-        ...updated,
-        currentQuestionId: next.id,
-        responses: {
-          ...updated.responses,
-          [next.id]: { ...nextResponse, status: nextResponse.status === "notVisited" ? "notAnswered" : nextResponse.status },
-        },
-      };
-    });
+    const next = questions[index + 1];
+    patch((currentAttempt) => commitQuestion(currentAttempt, current, mode, next?.id));
   }
 
   function markAndNext() {
@@ -223,32 +160,12 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
 
   function clearResponse() {
     if (!current) return;
-    patch((currentAttempt) => {
-      const response = currentAttempt.responses[current.id];
-      if (!response) return currentAttempt;
-      const marked = response.status === "marked" || response.status === "markedAnswered";
-      return {
-        ...currentAttempt,
-        responses: {
-          ...currentAttempt.responses,
-          [current.id]: { ...response, answer: null, pending: null, status: marked ? "marked" : "notAnswered" },
-        },
-      };
-    });
+    patch((currentAttempt) => clearAttemptAnswer(currentAttempt, current.id));
   }
 
   function toggleOption(option: number) {
     if (!current || option > Math.max(current.optionCount, current.msmCols)) return;
-    if (current.type === "mcq") {
-      const selected = shown?.kind === "mcq" ? shown.option : null;
-      writeAnswer(selected === option ? null : { kind: "mcq", option });
-      return;
-    }
-    if (current.type === "msq") {
-      const selected = shown?.kind === "msq" ? shown.options : [];
-      const options = selected.includes(option) ? selected.filter((item) => item !== option) : [...selected, option];
-      writeAnswer(options.length ? { kind: "msq", options } : null);
-    }
+    writeAnswer(toggleChoiceAnswer(current.type, shown, option));
   }
 
   function toggleMatrix(row: number, col: number) {
@@ -312,12 +229,10 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
       <div className="flex min-h-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-white px-4 py-2 text-sm">
-            <div>
+            <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold">Question {attempt.displayNumbers[current.id]}</span>
-              <span className="mx-2 text-slate-400">/</span>
-              <span>{current.canonicalSubject}</span>
-              <span className="mx-2 text-slate-400">·</span>
-              <span>{typeLabel(current.type)}</span>
+              <span className="rounded bg-[#0f3d73] px-2 py-1 text-xs font-bold uppercase tracking-wide text-white">{typeLabel(current.type)}</span>
+              <span className="text-slate-600">{current.canonicalSubject}</span>
             </div>
             <p className="text-slate-600">{markingText(current)}</p>
           </div>
@@ -438,7 +353,7 @@ function AnswerControls({
   onMatrix: (row: number, col: number) => void;
   onNat: (value: string) => void;
 }) {
-  if (question.type === "nat") {
+  if (question.type === "numerical") {
     return (
       <label className="mt-5 block">
         <span className="text-sm font-semibold">Numerical answer</span>
@@ -452,7 +367,7 @@ function AnswerControls({
       </label>
     );
   }
-  if (question.type === "msm") {
+  if (question.type === "matrix_match") {
     const rows = answer?.kind === "msm" ? answer.rows : {};
     return (
       <div className="mt-5 overflow-auto">
@@ -485,26 +400,42 @@ function AnswerControls({
       </div>
     );
   }
-  const selected = answer?.kind === "msq" ? answer.options : answer?.kind === "mcq" ? [answer.option] : [];
+  const selected = answer?.kind === "choice" ? answer.options : [];
+  const single = question.type === "single_correct";
+  const unresolved = question.type === "objective";
   return (
     <fieldset className="mt-5">
-      <legend className="mb-2 text-sm font-semibold">{question.type === "mcq" ? "Choose one option" : "Choose all correct options"}</legend>
+      <legend className="mb-2 text-sm font-semibold">
+        {single
+          ? "Choose one option"
+          : unresolved
+            ? "Select option(s) — attach an answer key to identify single vs multiple correct"
+            : "Choose all correct options"}
+      </legend>
       <div className="grid gap-2 sm:grid-cols-2">
         {Array.from({ length: question.optionCount }, (_, i) => {
           const option = i + 1;
           const active = selected.includes(option);
           return (
-            <button
+            <label
               key={option}
-              type="button"
-              className={cx("flex items-center gap-3 border px-3 py-3 text-left", active ? "border-[#0f3d73] bg-blue-50" : "border-slate-300 bg-white")}
-              onClick={() => onOption(option)}
+              className={cx("flex cursor-pointer items-center gap-3 border px-3 py-3 text-left", active ? "border-[#0f3d73] bg-blue-50" : "border-slate-300 bg-white")}
             >
-              <span className={cx("grid h-8 w-8 place-items-center border font-semibold", question.type === "mcq" ? "rounded-full" : "rounded-sm", active && "bg-[#0f3d73] text-white")}>
+              <input
+                className="h-4 w-4 shrink-0 accent-[#0f3d73]"
+                type={single ? "radio" : "checkbox"}
+                name={`question-${question.id}-options`}
+                checked={active}
+                onChange={() => onOption(option)}
+                aria-label={`Option ${optionLabel(option, question.counterPrimary)}`}
+              />
+              <span className={cx("grid h-8 w-8 place-items-center border font-semibold", single ? "rounded-full" : "rounded-sm", active && "bg-[#0f3d73] text-white")}>
                 {optionLabel(option, question.counterPrimary)}
               </span>
-              <span className="text-sm">{question.type === "mcq" ? "Single correct" : "Multiple correct"}</span>
-            </button>
+              <span className="text-sm">
+                {single ? "Single correct" : unresolved ? "Objective option" : "Multiple correct"}
+              </span>
+            </label>
           );
         })}
       </div>

@@ -79,16 +79,18 @@ export function kindLabel(kind: TestKind) {
 }
 
 export function typeLabel(type: QuestionType) {
-  if (type === "mcq") return "Single Correct";
-  if (type === "msq") return "MSQ";
-  if (type === "nat") return "Numerical";
-  return "Matrix";
+  if (type === "single_correct") return "SINGLE CORRECT";
+  if (type === "multiple_correct") return "MULTIPLE CORRECT";
+  if (type === "numerical") return "NUMERICAL ANSWER";
+  if (type === "objective") return "OBJECTIVE TYPE UNKNOWN";
+  return "MATRIX MATCH";
 }
 
 export function typeShort(type: QuestionType) {
-  if (type === "mcq") return "SCQ";
-  if (type === "msq") return "MSQ";
-  if (type === "nat") return "NAT";
+  if (type === "single_correct") return "SCQ";
+  if (type === "multiple_correct") return "MSQ";
+  if (type === "numerical") return "NAT";
+  if (type === "objective") return "OBJ";
   return "MSM";
 }
 
@@ -141,45 +143,55 @@ export function optionLabel(index1: number, counter = "upper-latin") {
   return list[index1 - 1] ?? String(index1);
 }
 
+export function optionIndex(label: string, counter = "upper-latin") {
+  const normalized = label.trim().toLocaleLowerCase();
+  const list = COUNTERS[counter] ?? COUNTERS["upper-latin"];
+  const index = list.findIndex((item) => item.toLocaleLowerCase() === normalized);
+  return index < 0 ? null : index + 1;
+}
+
 export function questionMaxMarks(q: Pick<Question, "type" | "marks" | "msmRows">) {
   if (typeof q.marks.max === "number" && q.marks.max > 0) return Math.abs(q.marks.max);
-  if (q.type === "msm") return Math.abs(q.marks.cm) * Math.max(1, q.msmRows || 1);
+  if (q.type === "matrix_match") return Math.abs(q.marks.cm) * Math.max(1, q.msmRows || 1);
   return Math.abs(q.marks.cm);
 }
 
 export function markingText(q: Pick<Question, "type" | "marks" | "msmRows">) {
   const plus = formatMarks(Math.abs(q.marks.cm));
   const minus = formatMarks(Math.abs(q.marks.im));
-  if (q.type === "msq") {
-    const partial = q.marks.pm == null ? "no partial" : `partial +${formatMarks(Math.abs(q.marks.pm))} per correct option`;
+  if (q.type === "multiple_correct") {
+    const partial = q.marks.pm != null && q.marks.pm > 0
+      ? `partial +${formatMarks(Math.abs(q.marks.pm))} per correct option`
+      : "no partial";
     return `+${plus} all correct, ${partial}, −${minus} if any wrong option`;
   }
-  if (q.type === "msm") {
+  if (q.type === "matrix_match") {
     return `+${plus} per correct row, −${minus} per wrong row`;
   }
-  if (q.type === "nat") {
+  if (q.type === "numerical") {
     return Math.abs(q.marks.im) === 0 ? `+${plus}, no negative` : `+${plus} / −${minus}`;
   }
   return `+${plus} / −${minus}`;
 }
 
 export function answerIsEmpty(type: QuestionType, answer: UserAnswer | null) {
-  if (!answer || answer.kind !== type) return true;
-  if (answer.kind === "mcq") return !Number.isInteger(answer.option) || answer.option < 1;
-  if (answer.kind === "msq") return answer.options.length === 0;
-  if (answer.kind === "nat") {
+  if (!answer) return true;
+  if (type === "single_correct" || type === "multiple_correct" || type === "objective") {
+    return answer.kind !== "choice" || !answer.options.some((option) => Number.isInteger(option) && option > 0);
+  }
+  if (type === "numerical") {
+    if (answer.kind !== "nat") return true;
     const value = answer.value.trim();
     if (!value) return true;
     return Number.isNaN(parseFloat(value));
   }
-  return Object.values(answer.rows).every((cols) => cols.length === 0);
+  return answer.kind !== "msm" || Object.values(answer.rows).every((cols) => cols.length === 0);
 }
 
 export function formatUserAnswer(q: Question, answer: UserAnswer | null) {
   if (answerIsEmpty(q.type, answer) || !answer) return "—";
-  if (answer.kind === "mcq") return optionLabel(answer.option, q.counterPrimary);
-  if (answer.kind === "msq") {
-    return [...answer.options]
+  if (answer.kind === "choice") {
+    return [...new Set(answer.options)]
       .sort((a, b) => a - b)
       .map((n) => optionLabel(n, q.counterPrimary))
       .join(", ");
@@ -199,7 +211,7 @@ export function formatUserAnswer(q: Question, answer: UserAnswer | null) {
     .join(" · ");
 }
 
-export function formatOfficialAnswer(q: Question, answer: OfficialAnswer = q.answer) {
+export function formatOfficialAnswer(q: Question, answer: OfficialAnswer = q.correctAnswer) {
   if (answer.kind === "missing") return "No key";
   if (answer.kind === "bonus") return "BONUS";
   if (answer.kind === "dropped") return "DROPPED";
@@ -207,7 +219,7 @@ export function formatOfficialAnswer(q: Question, answer: OfficialAnswer = q.ans
     const labels = [...answer.values]
       .sort((a, b) => a - b)
       .map((n) => optionLabel(n, q.counterPrimary));
-    if (q.type === "mcq" && labels.length > 1) return labels.join(" or ");
+    if (q.type === "single_correct" && labels.length > 1) return labels.join(" or ");
     return labels.join(", ") || "—";
   }
   if (answer.kind === "nat") {
