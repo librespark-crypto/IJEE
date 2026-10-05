@@ -1,6 +1,9 @@
 export type ExamType = "jee-main" | "jee-advanced" | "custom";
 export type TestKind = "full" | "part" | "practice";
-export type QuestionType = "mcq" | "msq" | "nat" | "msm";
+/** Canonical question types used after import. `objective` is reserved for MCQ
+ * records whose answer key is missing, so we do not guess single vs multiple. */
+export type QuestionType = "single_correct" | "multiple_correct" | "numerical" | "matrix_match" | "objective";
+export type QuestionTypeInput = QuestionType | "mcq" | "msq" | "nat" | "msm" | "scq";
 export type QuestionStatus =
   | "notVisited"
   | "notAnswered"
@@ -25,8 +28,7 @@ export type QuestionMarks = {
 };
 
 export type UserAnswer =
-  | { kind: "mcq"; option: number }
-  | { kind: "msq"; options: number[] }
+  | { kind: "choice"; options: number[] }
   | { kind: "nat"; value: string }
   | { kind: "msm"; rows: Record<string, number[]> };
 
@@ -52,7 +54,7 @@ export type Question = {
   msmCols: number;
   counterPrimary?: string;
   counterSecondary?: string;
-  answer: OfficialAnswer;
+  correctAnswer: OfficialAnswer;
   hasAnswerKey: boolean;
   imageIds: string[];
   solution?: string;
@@ -96,6 +98,8 @@ export type AttemptResponse = {
   answer: UserAnswer | null;
   /** Uncommitted selection when real-exam save is on. */
   pending: UserAnswer | null;
+  /** Distinguishes an intentionally cleared draft from no pending edit. */
+  pendingDirty?: boolean;
   status: QuestionStatus;
   timeSpent: number;
 };
@@ -278,10 +282,16 @@ export type ImportDraft = {
   blocking: string[];
 };
 
+export type AnswerKeyEntry = {
+  /** Kept raw until matched to a question so numeric answers are never guessed to be option indexes. */
+  raw: unknown;
+  declaredType?: QuestionTypeInput | string;
+};
+
 export type AnswerKeyDraft = {
   kind: "answer-key";
   report: ValidationItem[];
-  answers: Record<string, OfficialAnswer>;
+  answers: Record<string, AnswerKeyEntry>;
   keyed: number;
   sourceName: string;
 };

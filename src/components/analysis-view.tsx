@@ -10,7 +10,7 @@ import { cx, examLabel, formatClock, formatDate, formatDuration, formatMarks, fo
 import { getImages } from "@/lib/storage";
 import type { Attempt, Evaluation, QuestionAnalysis, QuestionType, ResultStatus, StoredTest } from "@/lib/types";
 
-const FILTERS = ["All", "Correct", "Incorrect", "Unattempted", "Marked", "Physics", "Chemistry", "Mathematics", "Single", "MSQ", "Numerical", "Matrix"] as const;
+const FILTERS = ["All", "Correct", "Incorrect", "Unattempted", "Marked", "Physics", "Chemistry", "Mathematics", "Single", "Multiple", "Numerical", "Matrix", "Type unknown"] as const;
 
 export function AnalysisView({ attemptId }: { attemptId: string }) {
   const { ready, attempts, tests, putAttempt, settings } = useStore();
@@ -27,7 +27,7 @@ export function AnalysisView({ attemptId }: { attemptId: string }) {
   useEffect(() => {
     if (!attempt || !test || !evaluation) return;
     const stored = attempt.evaluation;
-    const changed = !stored || stored.score !== evaluation.score || stored.missingKeyCount !== evaluation.missingKeyCount || stored.correct !== evaluation.correct;
+    const changed = JSON.stringify(stored) !== JSON.stringify(evaluation);
     if (changed) void putAttempt({ ...attempt, evaluation });
   }, [attempt, test, evaluation, putAttempt]);
 
@@ -142,6 +142,26 @@ Give a rigorous solution, an alternate method if one exists, the concept, and cl
             </dl>
           </article>
         ))}
+      </section>
+
+      <section className="mt-6">
+        <h2 className="font-display text-3xl">Statistics by question type</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {evaluation.types.map((type) => (
+            <article key={type.name} className="manga-panel p-4">
+              <h3 className="font-semibold">{type.name}</h3>
+              <p className="mt-1 font-note text-lg">{evaluation.scored ? `${formatMarks(type.score)} / ${formatMarks(type.maxMarks)}` : "Unscored"}</p>
+              <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                <Mini label="Accuracy" value={evaluation.scored ? formatPercent(type.accuracy) : "—"} />
+                <Mini label="Attempt" value={formatPercent(type.attemptRate)} />
+                <Mini label="Correct" value={String(type.correct)} />
+                <Mini label="Incorrect" value={String(type.incorrect)} />
+                <Mini label="Partial" value={String(type.partial)} />
+                <Mini label="Unattempted" value={String(type.unattempted)} />
+              </dl>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="mt-8 grid gap-4 lg:grid-cols-2">
@@ -263,7 +283,13 @@ function matches(question: QuestionAnalysis, filter: (typeof FILTERS)[number]) {
   if (filter === "Unattempted") return question.status === "notAnswered";
   if (filter === "Marked") return question.marked;
   if (filter === "Physics" || filter === "Chemistry" || filter === "Mathematics") return question.canonicalSubject === filter;
-  const type: Record<string, QuestionType> = { Single: "mcq", MSQ: "msq", Numerical: "nat", Matrix: "msm" };
+  const type: Partial<Record<(typeof FILTERS)[number], QuestionType>> = {
+    Single: "single_correct",
+    Multiple: "multiple_correct",
+    Numerical: "numerical",
+    Matrix: "matrix_match",
+    "Type unknown": "objective",
+  };
   return question.type === type[filter];
 }
 

@@ -69,33 +69,37 @@ function scoreChoice(
   cm: number,
   pm: number,
   im: number,
+  partialMarkingConfigured: boolean,
 ): Pick<QuestionResult, "status" | "marks" | "accuracyNumerator"> {
-  if (key.kind !== "choice") {
+  if (key.kind !== "choice" || user?.kind !== "choice") {
     return { status: "incorrect", marks: im, accuracyNumerator: 0 };
   }
-  if (type === "mcq") {
-    const selected = user?.kind === "mcq" ? user.option : null;
-    if (selected != null && key.values.includes(selected)) {
-      return { status: "correct", marks: cm, accuracyNumerator: 1 };
-    }
+  const selected = [...new Set(user.options)];
+  const correct = [...new Set(key.values)];
+  if (type === "single_correct") {
+    const exact = selected.length === 1 && correct.length === 1 && setsEqual(selected, correct);
+    return exact
+      ? { status: "correct", marks: cm, accuracyNumerator: 1 }
+      : { status: "incorrect", marks: im, accuracyNumerator: 0 };
+  }
+  if (type !== "multiple_correct") {
     return { status: "incorrect", marks: im, accuracyNumerator: 0 };
   }
-  if (type === "msq") {
-    const selected = user?.kind === "msq" ? [...new Set(user.options)] : [];
-    const correct = new Set(key.values);
-    const subset = selected.length > 0 && selected.every((n) => correct.has(n));
-    if (subset && selected.length === correct.size) {
-      return { status: "correct", marks: cm, accuracyNumerator: 1 };
-    }
-    if (subset) {
-      const ratio = correct.size === 0 ? 0 : selected.length / correct.size;
-      return {
-        status: "partial",
-        marks: round2(pm * selected.length),
-        accuracyNumerator: Math.round(ratio * 100) / 100,
-      };
-    }
-    return { status: "incorrect", marks: im, accuracyNumerator: 0 };
+  if (setsEqual(selected, correct)) {
+    return { status: "correct", marks: cm, accuracyNumerator: 1 };
+  }
+  const isPartialSubset =
+    partialMarkingConfigured &&
+    selected.length > 0 &&
+    selected.length < correct.length &&
+    selected.every((option) => correct.includes(option));
+  if (isPartialSubset) {
+    const ratio = correct.length ? selected.length / correct.length : 0;
+    return {
+      status: "partial",
+      marks: round2(pm * selected.length),
+      accuracyNumerator: Math.round(ratio * 100) / 100,
+    };
   }
   return { status: "incorrect", marks: im, accuracyNumerator: 0 };
 }
@@ -138,6 +142,7 @@ function scoreMsm(
 export function evaluateQuestion(q: Question, response: AttemptResponse): QuestionResult {
   const cm = positive(q.marks.cm);
   const pm = positive(q.marks.pm);
+  const partialMarkingConfigured = typeof q.marks.pm === "number" && q.marks.pm > 0;
   const im = -positive(q.marks.im);
   const maxMarks = questionMaxMarks(q);
   const base: QuestionResult = {
@@ -146,13 +151,13 @@ export function evaluateQuestion(q: Question, response: AttemptResponse): Questi
     marks: 0,
     maxMarks,
     accuracyNumerator: 0,
-    missingKey: q.answer.kind === "missing",
+    missingKey: q.correctAnswer.kind === "missing",
   };
 
-  if (q.answer.kind === "dropped") {
+  if (q.correctAnswer.kind === "dropped") {
     return { ...base, status: "dropped", marks: maxMarks || cm, missingKey: false };
   }
-  if (q.answer.kind === "missing") {
+  if (q.correctAnswer.kind === "missing") {
     return { ...base, status: "notConsidered", marks: 0, maxMarks: 0, missingKey: true };
   }
 
@@ -161,31 +166,32 @@ export function evaluateQuestion(q: Question, response: AttemptResponse): Questi
     return base;
   }
 
-  if (q.answer.kind === "bonus") {
+  if (q.correctAnswer.kind === "bonus") {
     return { ...base, status: "bonus", marks: maxMarks || cm, accuracyNumerator: 1, missingKey: false };
   }
 
-  if (q.type === "nat") {
+  if (q.type === "numerical") {
     const raw = response.answer?.kind === "nat" ? response.answer.value : "";
-    const key = q.answer.kind === "nat" ? q.answer.raw : "";
+    const key = q.correctAnswer.kind === "nat" ? q.correctAnswer.raw : "";
     if (natMatches(raw, key)) {
       return { ...base, status: "correct", marks: cm, accuracyNumerator: 1 };
     }
     return { ...base, status: "incorrect", marks: im };
   }
 
-  if (q.type === "msm") {
-    const scored = scoreMsm(response.answer, q.answer, cm, im);
+  if (q.type === "matrix_match") {
+    const scored = scoreMsm(response.answer, q.correctAnswer, cm, im);
     return { ...base, ...scored };
   }
 
-  // mcq and msq stay on separate branches. An MSQ array is never scored as single-correct.
-  const scored = scoreChoice(q.type, response.answer, q.answer, cm, pm, im);
+  // Both objective modes use an option set; the normalized question type alone
+  // determines whether it must contain exactly one or the complete correct set.
+  const scored = scoreChoice(q.type, response.answer, q.correctAnswer, cm, pm, im, partialMarkingConfigured);
   return { ...base, ...scored };
 }
 
 function keepPriority(q: Question, response: AttemptResponse) {
-  if (q.answer.kind === "dropped" || q.answer.kind === "bonus") return 0;
+  if (q.correctAnswer.kind === "dropped" || q.correctAnswer.kind === "bonus") return 0;
   if (response.status === "answered" || response.status === "markedAnswered") return 1;
   return 2;
 }
@@ -380,7 +386,7 @@ export function buildInsights(questions: QuestionAnalysis[], subjects: BucketSta
     });
   }
 
-  const calc = judged.filter((q) => q.type === "nat" && q.status === "incorrect" && q.timeSpent >= Math.max(40, med));
+  const calc = judged.filter((q) => q.type === "numerical" && q.status === "incorrect" && q.timeSpent >= Math.max(40, med));
   if (calc.length) {
     insights.push({
       id: "calculation",
@@ -392,7 +398,7 @@ export function buildInsights(questions: QuestionAnalysis[], subjects: BucketSta
   }
 
   const conceptual = judged.filter(
-    (q) => (q.type === "mcq" || q.type === "msq") && q.status === "incorrect" && q.timeSpent >= 45,
+    (q) => (q.type === "single_correct" || q.type === "multiple_correct") && q.status === "incorrect" && q.timeSpent >= 45,
   );
   if (conceptual.length >= 2) {
     insights.push({
@@ -487,10 +493,11 @@ function formatScore(score: number, max: number) {
 }
 
 function labelType(type: string) {
-  if (type === "mcq") return "Single Correct";
-  if (type === "msq") return "MSQ";
-  if (type === "nat") return "Numerical";
-  return "Matrix";
+  if (type === "single_correct") return "Single Correct";
+  if (type === "multiple_correct") return "Multiple Correct";
+  if (type === "numerical") return "Numerical Answer";
+  if (type === "objective") return "Objective (type unknown)";
+  return "Matrix Match";
 }
 
 function listNumbers(rows: QuestionAnalysis[]) {

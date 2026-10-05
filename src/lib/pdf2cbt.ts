@@ -1,11 +1,11 @@
 import JSZip from "jszip";
-import { canonicalSubject, examLabel, markingText, slug } from "./format";
+import { canonicalSubject, examLabel, markingText, slug, typeLabel } from "./format";
 import type {
   AnswerKeyDraft,
+  AnswerKeyEntry,
   CropJob,
   ExamType,
   ImportDraft,
-  OfficialAnswer,
   Question,
   QuestionMarks,
   QuestionType,
@@ -14,13 +14,19 @@ import type {
   TestSection,
   ValidationItem,
 } from "./types";
+import {
+  answerKeyEntry,
+  combineQuestionType,
+  parseOfficialAnswer,
+  resolveQuestionType,
+} from "./question-normalizer";
 
 const SEPARATOR = "__--__";
-const QUESTION_TYPES = new Set<QuestionType>(["mcq", "msq", "nat", "msm"]);
 
 type RawQuestion = {
   que?: number;
   type?: string;
+  questionType?: string;
   answerOptions?: string;
   marks?: Record<string, unknown>;
   pdfData?: { page?: number; x1?: number; y1?: number; x2?: number; y2?: number }[];
@@ -63,17 +69,6 @@ function textOf(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function normalizeType(raw: unknown): QuestionType | null {
-  if (typeof raw !== "string") return null;
-  const value = raw.trim().toLowerCase();
-  if (QUESTION_TYPES.has(value as QuestionType)) return value as QuestionType;
-  if (["scq", "single", "single-correct", "single correct"].includes(value)) return "mcq";
-  if (["multiple", "multi", "multi-correct", "multiple correct"].includes(value)) return "msq";
-  if (["integer", "numerical", "numeric", "integer answer"].includes(value)) return "nat";
-  if (["matrix", "match", "matrix-match"].includes(value)) return "msm";
-  return null;
-}
-
 function readMarks(raw: unknown): { marks: QuestionMarks | null; imMissing: boolean } {
   const record = asRecord(raw);
   if (!record) return { marks: null, imMissing: true };
@@ -94,57 +89,15 @@ function readMarks(raw: unknown): { marks: QuestionMarks | null; imMissing: bool
   };
 }
 
-export function unwrapAnswer(raw: unknown, type: QuestionType): OfficialAnswer {
-  if (raw == null || raw === "") return { kind: "missing" };
-  const record = asRecord(raw);
-  if (record && "correctAnswer" in record) return unwrapAnswer(record.correctAnswer, type);
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    const upper = trimmed.toUpperCase();
-    if (upper === "BONUS") return { kind: "bonus" };
-    if (upper === "DROPPED") return { kind: "dropped" };
-    if (type === "mcq" || type === "msq") {
-      const asNum = Number(trimmed);
-      if (Number.isFinite(asNum)) return { kind: "choice", values: [asNum] };
-    }
-    return { kind: "nat", raw: trimmed };
-  }
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    if (type === "nat") return { kind: "nat", raw: String(raw) };
-    return { kind: "choice", values: [raw] };
-  }
-  if (Array.isArray(raw)) {
-    if (type === "nat") {
-      const rawText = raw
-        .map((item) => {
-          const range = asRecord(item);
-          if (range && toNum(range.min) != null && toNum(range.max) != null) return `${range.min}TO${range.max}`;
-          return String(item);
-        })
-        .join(",");
-      return { kind: "nat", raw: rawText };
-    }
-    return { kind: "choice", values: raw.map(Number).filter((n) => Number.isFinite(n)) };
-  }
-  if (record) {
-    const rows: Record<string, number[]> = {};
-    for (const [key, value] of Object.entries(record)) {
-      if (Array.isArray(value)) rows[String(key)] = value.map(Number).filter((n) => Number.isFinite(n));
-    }
-    if (Object.keys(rows).length) return { kind: "msm", rows };
-  }
-  return { kind: "missing" };
-}
-
 function parseOptions(raw: unknown, type: QuestionType) {
   const text = typeof raw === "string" ? raw : "";
   const parts = text
     .toLowerCase()
     .split("x")
     .map(Number)
-    .filter((n) => !Number.isNaN(n) && n > 0);
-  if (type === "nat") return { optionCount: 0, msmRows: 1, msmCols: 1 };
-  if (type === "msm") {
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (type === "numerical") return { optionCount: 0, msmRows: 1, msmCols: 1 };
+  if (type === "matrix_match") {
     const rows = parts[0] || 4;
     const cols = parts[1] || parts[0] || 4;
     return { optionCount: rows, msmRows: rows, msmCols: cols };
@@ -195,20 +148,21 @@ function instructionOf(config: Record<string, unknown>, subject: string, section
   return textOf(instructions?.type);
 }
 
-function answerNode(json: Record<string, unknown>, subject: string, section: string, key: string) {
+function answerNode(json: Record<string, unknown>, subject: string, section: string, key: string, number?: number) {
   const tree = asRecord(json.testAnswerKey);
   const subjectNode = tree ? asRecord(tree[subject]) : null;
   const sectionNode = subjectNode ? asRecord(subjectNode[section]) : null;
-  return sectionNode ? sectionNode[key] : undefined;
+  if (!sectionNode) return undefined;
+  return sectionNode[key] ?? (number == null ? undefined : sectionNode[String(number)]);
 }
 
 function detectExam(name: string, questions: Question[]): ExamType {
   const n = name.toLowerCase();
   if (/\badv(anced)?\b/.test(n) || n.includes("jee advanced")) return "jee-advanced";
   if (n.includes("main")) return "jee-main";
-  if (questions.some((q) => q.type === "msq" || q.type === "msm" || (q.marks.pm ?? 0) > 0)) return "jee-advanced";
-  const mcq = questions.filter((q) => q.type === "mcq");
-  if (mcq.length && mcq.every((q) => Math.abs(q.marks.cm) === 4 && Math.abs(q.marks.im) === 1)) return "jee-main";
+  if (questions.some((q) => q.type === "multiple_correct" || q.type === "matrix_match" || (q.marks.pm ?? 0) > 0)) return "jee-advanced";
+  const singleCorrect = questions.filter((q) => q.type === "single_correct");
+  if (singleCorrect.length && singleCorrect.every((q) => Math.abs(q.marks.cm) === 4 && Math.abs(q.marks.im) === 1)) return "jee-main";
   return "custom";
 }
 
@@ -364,11 +318,6 @@ async function parseJson(
   let imMissing = 0;
   let keyed = 0;
 
-  const ordered = [...walked].sort((a, b) => {
-    if (a.subject !== b.subject) return 0;
-    if (a.section !== b.section) return 0;
-    return (toNum(a.key) ?? 0) - (toNum(b.key) ?? 0);
-  });
   // Preserve subject/section appearance order, but sort questions numerically inside a section.
   const grouped = new Map<string, Walked[]>();
   for (const row of walked) {
@@ -383,9 +332,15 @@ async function parseJson(
 
   for (const [, list] of grouped) {
     for (const row of list) {
-      const type = normalizeType(row.raw.type);
       const number = toNum(row.raw.que) ?? toNum(row.key);
-      if (!type || number == null) {
+      const keyRaw = answerNode(root, row.subject, row.section, row.key, number ?? undefined);
+      const keyEntry = answerKeyEntry(keyRaw);
+      const resultEntry = answerKeyEntry(row.raw.result?.correctAnswer);
+      const sourceType = combineQuestionType(
+        row.raw.type ?? row.raw.questionType,
+        keyEntry.declaredType ?? resultEntry.declaredType,
+      );
+      if (!sourceType || number == null) {
         failures.push(`${row.subject} / ${row.section} / ${row.key}: missing question type or number.`);
         continue;
       }
@@ -395,16 +350,16 @@ async function parseJson(
         continue;
       }
       if (marksRead.imMissing) imMissing += 1;
-      const options = parseOptions(row.raw.answerOptions, type);
-      const fromKey = unwrapAnswer(answerNode(root, row.subject, row.section, row.key), type);
-      const fromResult = row.raw.result?.correctAnswer
-        ? unwrapAnswer(row.raw.result.correctAnswer, type)
-        : { kind: "missing" as const };
+      const counter = row.raw.answerOptionsCounterType;
+      const counterPrimary = counter?.primary && counter.primary !== "default" ? counter.primary : undefined;
+      const options = parseOptions(row.raw.answerOptions, sourceType);
+      const fromKey = parseOfficialAnswer(keyRaw, sourceType, options.optionCount, counterPrimary);
+      const fromResult = parseOfficialAnswer(row.raw.result?.correctAnswer, sourceType, options.optionCount, counterPrimary);
       const answer = fromKey.kind === "missing" ? fromResult : fromKey;
+      const type = resolveQuestionType(sourceType, answer);
       if (answer.kind !== "missing") keyed += 1;
       const qid = `${testId}:${slug(row.subject)}:${slug(row.section)}:${number}`;
       const pdfData = Array.isArray(row.raw.pdfData) ? row.raw.pdfData : [];
-      const expected = Math.max(pdfData.length, 1);
       const imageIds: string[] = [];
       for (let i = 1; i <= (pdfData.length || 1); i += 1) {
         const imageId = `${qid}:img:${i}`;
@@ -443,7 +398,6 @@ async function parseJson(
         }
       }
       if (!imageIds.length) continue;
-      const counter = row.raw.answerOptionsCounterType;
       questions.push({
         id: qid,
         subject: row.subject,
@@ -455,16 +409,15 @@ async function parseJson(
         optionCount: options.optionCount,
         msmRows: options.msmRows,
         msmCols: options.msmCols,
-        counterPrimary: counter?.primary && counter.primary !== "default" ? counter.primary : undefined,
+        counterPrimary,
         counterSecondary: counter?.secondary && counter.secondary !== "default" ? counter.secondary : undefined,
-        answer,
+        correctAnswer: answer,
         hasAnswerKey: answer.kind !== "missing",
         imageIds,
         solution: textOf(row.raw.solution) ?? textOf(row.raw.explanation) ?? textOf(row.raw.solutionText) ?? textOf(row.raw.sol),
         topic: textOf(row.raw.topic) ?? textOf(row.raw.chapter),
         concept: textOf(row.raw.concept),
       });
-      void expected;
     }
   }
 
@@ -522,7 +475,6 @@ async function parseJson(
     questions,
     validation: report,
   };
-  void ordered;
   return { kind: "test", test, images, cropJobs, pdfBytes, report, blocking };
 }
 
@@ -618,9 +570,9 @@ function buildReport(input: {
 }
 
 function countTypes(list: Question[]) {
-  const counts = new Map<string, number>();
+  const counts = new Map<QuestionType, number>();
   for (const question of list) counts.set(question.type, (counts.get(question.type) ?? 0) + 1);
-  return [...counts.entries()].map(([type, count]) => `${count} ${type.toUpperCase()}`).join(", ");
+  return [...counts.entries()].map(([type, count]) => `${count} ${typeLabel(type)}`).join(", ");
 }
 
 function schemePreview(questions: Question[]) {
@@ -637,7 +589,7 @@ function schemePreview(questions: Question[]) {
 
 function answerKeyOnly(root: Record<string, unknown>, filename: string): AnswerKeyDraft {
   const tree = asRecord(root.testAnswerKey);
-  const answers: Record<string, OfficialAnswer> = {};
+  const answers: Record<string, AnswerKeyEntry> = {};
   let keyed = 0;
   if (tree) {
     for (const [subject, sectionNode] of Object.entries(tree)) {
@@ -648,12 +600,10 @@ function answerKeyOnly(root: Record<string, unknown>, filename: string): AnswerK
         if (!questions) continue;
         for (const [key, raw] of Object.entries(questions)) {
           const number = toNum(key);
-          if (number == null) continue;
-          const record = asRecord(raw);
-          const type = normalizeType(record?.type) ?? "mcq";
-          const answer = unwrapAnswer(raw, type);
-          if (answer.kind === "missing") continue;
-          answers[answerIndexKey(subject, section, number)] = answer;
+          if (number == null || raw == null || raw === "") continue;
+          const entry = answerKeyEntry(raw);
+          if (asRecord(raw)?.kind === "missing") continue;
+          answers[answerIndexKey(subject, section, number)] = entry;
           keyed += 1;
         }
       }
@@ -674,15 +624,19 @@ function answerKeyOnly(root: Record<string, unknown>, filename: string): AnswerK
   };
 }
 
-export function applyAnswerKey(test: StoredTest, answers: Record<string, OfficialAnswer>): StoredTest {
+export function applyAnswerKey(test: StoredTest, answers: Record<string, AnswerKeyEntry>): StoredTest {
   let keyed = 0;
   const questions = test.questions.map((question) => {
     const direct = answers[answerIndexKey(question.subject, question.section, question.number)];
     const canonical = answers[answerIndexKey(question.canonicalSubject, question.section, question.number)];
-    const answer = direct ?? canonical;
-    if (!answer || answer.kind === "missing") return question;
+    const entry = direct ?? canonical;
+    if (!entry) return question;
+    const sourceType = combineQuestionType(question.type, entry.declaredType);
+    const correctAnswer = parseOfficialAnswer(entry.raw, sourceType, question.optionCount, question.counterPrimary);
+    if (correctAnswer.kind === "missing") return question;
+    const type = resolveQuestionType(sourceType, correctAnswer);
     keyed += 1;
-    return { ...question, answer, hasAnswerKey: true };
+    return { ...question, type, correctAnswer, hasAnswerKey: true };
   });
   const validation = test.validation.map((item) =>
     item.label === "Answer Key"

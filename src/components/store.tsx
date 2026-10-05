@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Attempt, ChatThread, Settings, StoredTest, TopicProgress } from "@/lib/types";
+import { buildEvaluation } from "@/lib/evaluate";
 import {
   clearAllLocalData,
   defaultSettings,
@@ -52,13 +53,27 @@ export function Providers({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
 
   async function refresh() {
-    const [nextTests, nextAttempts, nextProgress, nextChats, nextSettings] = await Promise.all([
+    const [nextTests, storedAttempts, nextProgress, nextChats, nextSettings] = await Promise.all([
       listTests(),
       listAttempts(),
       listProgress(),
       listChats(),
       getSettings(),
     ]);
+    const testsById = new Map(nextTests.map((test) => [test.id, test]));
+    const attemptsToSave: Attempt[] = [];
+    const nextAttempts = storedAttempts.map((attempt) => {
+      const test = testsById.get(attempt.testId);
+      if (!test || attempt.status !== "submitted") return attempt;
+      const evaluation = buildEvaluation(test, attempt);
+      if (JSON.stringify(attempt.evaluation) !== JSON.stringify(evaluation)) {
+        const updated = { ...attempt, evaluation };
+        attemptsToSave.push(updated);
+        return updated;
+      }
+      return attempt;
+    });
+    if (attemptsToSave.length) await Promise.all(attemptsToSave.map(saveAttempt));
     setTests(nextTests.sort((a, b) => b.createdAt - a.createdAt));
     setAttempts(nextAttempts.sort((a, b) => b.updatedAt - a.updatedAt));
     setProgress(nextProgress);
@@ -66,6 +81,11 @@ export function Providers({ children }: { children: ReactNode }) {
     setSettings(nextSettings);
     setReady(true);
   }
+
+  const putAttempt = useCallback(async (attempt: Attempt) => {
+    await saveAttempt(attempt);
+    setAttempts((current) => [attempt, ...current.filter((item) => item.id !== attempt.id)].sort((a, b) => b.updatedAt - a.updatedAt));
+  }, []);
 
   useEffect(() => {
     setTimeout(() => { void refresh(); }, 0);
@@ -89,10 +109,7 @@ export function Providers({ children }: { children: ReactNode }) {
         await deleteTest(id);
         await refresh();
       },
-      putAttempt: async (attempt) => {
-        await saveAttempt(attempt);
-        setAttempts((current) => [attempt, ...current.filter((item) => item.id !== attempt.id)].sort((a, b) => b.updatedAt - a.updatedAt));
-      },
+      putAttempt,
       removeAttempt: async (id) => {
         await deleteAttempt(id);
         await refresh();
@@ -118,7 +135,7 @@ export function Providers({ children }: { children: ReactNode }) {
         await refresh();
       },
     }),
-    [ready, tests, attempts, progress, chats, settings],
+    [ready, tests, attempts, progress, chats, settings, putAttempt],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
