@@ -183,7 +183,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   assert.ok(await page.evaluate(() => window.scrollY > 0), "The long response should remain vertically scrollable");
 
-  await page.route("**/api/gemini", async (route) => {
+  await page.route("**/api/ai", async (route) => {
     const requestBody = route.request().postDataJSON();
     sentClientApiKey ||= Object.hasOwn(requestBody, "apiKey");
     await route.fulfill({
@@ -197,8 +197,8 @@ try {
   await page.getByText("Mocked short tutor answer:").waitFor();
   assert.equal(sentClientApiKey, false, "The browser must not send a Gemini API key");
 
-  await page.unroute("**/api/gemini");
-  await page.route("**/api/gemini", (route) => route.fulfill({
+  await page.unroute("**/api/ai");
+  await page.route("**/api/ai", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ error: `GEMINI_ERROR_${"UNBROKEN_ERROR_IDENTIFIER_".repeat(80)}` }),

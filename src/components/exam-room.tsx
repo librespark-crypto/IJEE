@@ -15,6 +15,7 @@ import {
 } from "@/lib/attempt";
 import { getAttempt, getImages, getTest } from "@/lib/storage";
 import type { Attempt, Question, StoredTest, UserAnswer } from "@/lib/types";
+import { SolveWithAIButton } from "./solve-sheet";
 import { useStore } from "./store";
 
 export function ExamRoom({ attemptId }: { attemptId: string }) {
@@ -234,7 +235,17 @@ export function ExamRoom({ attemptId }: { attemptId: string }) {
               <span className="rounded bg-[#0f3d73] px-2 py-1 text-xs font-bold uppercase tracking-wide text-white">{typeLabel(current.type)}</span>
               <span className="text-slate-600">{current.canonicalSubject}</span>
             </div>
-            <p className="text-slate-600">{markingText(current)}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-slate-600">{markingText(current)}</p>
+              <SolveWithAIButton
+                test={test}
+                question={current}
+                displayNumber={attempt.displayNumbers[current.id]}
+                urls={urls}
+                sectionInstruction={section?.instructionType ?? null}
+                variant="cbt"
+              />
+            </div>
           </div>
           {section?.instructionType && section.questionIds[0] === current.id ? (
             <p className="border-b bg-amber-50 px-4 py-2 text-sm text-amber-950">

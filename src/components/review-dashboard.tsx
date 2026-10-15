@@ -26,6 +26,7 @@ import {
 } from "@/lib/format";
 import { getImages } from "@/lib/storage";
 import type { Attempt, Evaluation, QuestionAnalysis, StoredTest } from "@/lib/types";
+import { SolveWithAIButton } from "@/components/solve-sheet";
 
 const TABS = [
   "Overview",
@@ -965,6 +966,10 @@ function QuestionReviewStepper({
   const current = questions[currentIndex] ?? null;
   const [showPalette, setShowPalette] = useState(false);
   const [solutionOpen, setSolutionOpen] = useState(true);
+  const currentQuestion = current ? test.questions.find((q) => q.id === current.questionId) : undefined;
+  const currentSectionInstruction = current
+    ? test.sections.find((section) => section.questionIds.includes(current.questionId))?.instructionType
+    : undefined;
 
   if (!current) {
     return (
@@ -1067,6 +1072,17 @@ function QuestionReviewStepper({
               <div className="flex flex-wrap items-center gap-2">
                 {diff && <span className={cx("manga-badge", difficultyBadgeClass(diff))}>{diff}</span>}
                 {quality && <span className={cx("manga-badge", qualityBadgeClass(quality))}>{qualityLabel(quality)}</span>}
+                {currentQuestion ? (
+                  <SolveWithAIButton
+                    test={test}
+                    question={currentQuestion}
+                    displayNumber={current.displayNumber}
+                    urls={urls}
+                    userAnswerLabel={current.userLabel}
+                    allowAnswerKey
+                    sectionInstruction={currentSectionInstruction ?? null}
+                  />
+                ) : null}
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-3 text-sm">
