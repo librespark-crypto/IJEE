@@ -96,12 +96,14 @@ export function ReviewDashboard({ attemptId }: { attemptId: string }) {
 
   // Load learnings from localStorage
   useEffect(() => {
-    if (attemptId) {
+    if (!attemptId) return;
+    const timer = setTimeout(() => {
       try {
         const stored = localStorage.getItem(`learnings-${attemptId}`);
         if (stored) setLearnings(JSON.parse(stored));
       } catch { /* ignore */ }
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [attemptId]);
 
   const saveLearnings = useCallback((items: string[]) => {
@@ -137,7 +139,7 @@ export function ReviewDashboard({ attemptId }: { attemptId: string }) {
         if (!blob) continue;
         images.push({ mimeType: blob.type || "image/png", data: await toBase64(blob) });
       }
-      const response = await fetch("/api/gemini", {
+      const response = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
