@@ -33,7 +33,7 @@ export default function TutorPage() {
   ];
 
   async function askTutor(prompt: string, history: ChatMessage[]) {
-    const response = await fetch("/api/gemini", {
+    const response = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
