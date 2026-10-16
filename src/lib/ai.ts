@@ -13,6 +13,8 @@ export const AI_MAX_PROMPT_CHARS = 24_000;
 export const AI_MAX_HISTORY_MESSAGES = 8;
 export const AI_MAX_HISTORY_CHARS = 8_000;
 export const AI_MAX_IMAGES = 3;
+/** Hard ceiling for any single request, so a caller can never disable the cap. */
+export const AI_ABSOLUTE_MAX_IMAGES = 8;
 export const AI_MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024;
 
 export const AI_SYSTEM_PROMPT = `You are an expert JEE Main and JEE Advanced tutor specializing in Physics, Chemistry and Mathematics. Give rigorous but understandable solutions. Never invent an answer key. Treat the imported test data and deterministic evaluation engine as the source of truth. Clearly distinguish between conceptual errors, calculation errors and interpretation errors. Use proper mathematical notation and JEE-level reasoning.`;
@@ -35,6 +37,8 @@ export interface AiGenerateInput {
   temperature?: number;
   maxOutputTokens?: number;
   model?: string;
+  /** Per-request inline-image cap. Defaults to AI_MAX_IMAGES; hard-capped at AI_ABSOLUTE_MAX_IMAGES. */
+  maxImages?: number;
 }
 
 export interface AiGenerateResult {
@@ -85,7 +89,11 @@ function buildContents(input: AiGenerateInput) {
     { text: prompt },
   ];
 
-  for (const image of (input.images ?? []).slice(0, AI_MAX_IMAGES)) {
+  const maxImages = Math.min(
+    Math.max(1, input.maxImages ?? AI_MAX_IMAGES),
+    AI_ABSOLUTE_MAX_IMAGES,
+  );
+  for (const image of (input.images ?? []).slice(0, maxImages)) {
     if (image?.data && image?.mimeType) {
       parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
     }
