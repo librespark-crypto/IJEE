@@ -6,11 +6,47 @@ import { useRouter } from "next/navigation";
 import { useStore } from "@/components/store";
 import { createAttempt } from "@/lib/attempt";
 import { examLabel, formatDate, kindLabel } from "@/lib/format";
+import { convertZipToOfflineHtml, exportTestToZip, triggerDownload } from "@/lib/offline-export";
+import type { StoredTest } from "@/lib/types";
 
 export default function TestsPage() {
   const router = useRouter();
   const { tests, attempts, settings, putAttempt, removeTest } = useStore();
   const [confirmId, setConfirmId] = useState("");
+  const [exportState, setExportState] = useState<{
+    active: boolean;
+    testName: string;
+    step: string;
+    pct: number;
+    error: string;
+  }>({ active: false, testName: "", step: "", pct: 0, error: "" });
+
+  async function handleExportOffline(test: StoredTest) {
+    setExportState({
+      active: true,
+      testName: test.name,
+      step: "Starting export...",
+      pct: 5,
+      error: "",
+    });
+    try {
+      const zipBlob = await exportTestToZip(test, (step, pct) => {
+        setExportState((prev) => ({ ...prev, step, pct }));
+      });
+      const result = await convertZipToOfflineHtml(zipBlob, (step, pct) => {
+        setExportState((prev) => ({ ...prev, step, pct }));
+      });
+      triggerDownload(result.html, result.filename);
+      setTimeout(() => {
+        setExportState((prev) => ({ ...prev, active: false }));
+      }, 600);
+    } catch (err) {
+      setExportState((prev) => ({
+        ...prev,
+        error: err instanceof Error ? err.message : "Offline export failed.",
+      }));
+    }
+  }
 
   async function start(testId: string) {
     const test = tests.find((item) => item.id === testId);
@@ -44,6 +80,12 @@ export default function TestsPage() {
                   {open ? <Link className="bg-[var(--indigo)] px-3 py-2 text-sm text-white" href={`/exam/${open.id}`}>Resume</Link> : null}
                   <button className="bg-[var(--ink)] px-3 py-2 text-sm text-white" onClick={() => void start(test.id)}>{latest ? "Retake" : "Start"}</button>
                   {latest ? <Link className="border-2 border-[var(--ink)] px-3 py-2 text-sm" href={`/analysis/${latest.id}`}>Latest analysis</Link> : null}
+                  <button
+                    className="border-2 border-[var(--ink)] bg-[var(--paper)] px-3 py-2 text-sm"
+                    onClick={() => void handleExportOffline(test)}
+                  >
+                    Export for Offline Attempt
+                  </button>
                   <button className="border-2 border-[var(--vermilion)] px-3 py-2 text-sm" onClick={() => setConfirmId(test.id)}>Delete</button>
                 </div>
               </div>
@@ -64,6 +106,39 @@ export default function TestsPage() {
               <button className="border-2 border-[var(--ink)] px-3 py-2" onClick={() => setConfirmId("")}>Keep</button>
               <button className="bg-[var(--vermilion)] px-3 py-2 text-white" onClick={() => { void removeTest(confirmId); setConfirmId(""); }}>Delete</button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {exportState.active ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-md border-[3px] border-[var(--ink)] bg-[#fffaf3] p-5">
+            <h2 className="font-display text-2xl">Exporting Offline CBT</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">{exportState.testName}</p>
+            {exportState.error ? (
+              <div className="mt-4">
+                <p className="text-sm font-semibold text-[var(--vermilion)]">{exportState.error}</p>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    className="border-2 border-[var(--ink)] px-3 py-1.5 text-sm"
+                    onClick={() => setExportState((prev) => ({ ...prev, active: false }))}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <div className="h-3 w-full border-2 border-[var(--ink)] bg-[var(--paper)]">
+                  <div
+                    className="h-full bg-[var(--moss)] transition-all duration-200"
+                    style={{ width: `${exportState.pct}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  {exportState.step} ({exportState.pct}%)
+                </p>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
