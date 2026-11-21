@@ -89,7 +89,7 @@ const SUBJECT_COLORS: Record<string, string> = {
 };
 
 export function SubjectTimeBar({ data }: { data: { name: string; value: number }[] }) {
-  if (!data.length) return <EmptyChart text="Nothing to chart." />;
+  if (!data.length || data.every((entry) => entry.value === 0)) return <EmptyChart text="No data yet" />;
   return (
     <div className="h-56">
       <ResponsiveContainer width="100%" height="100%">
@@ -157,7 +157,9 @@ export function AttemptQualityChart({
 }: {
   data: { name: string; Perfect: number; Wasted: number; Overtime: number; Confused: number }[];
 }) {
-  if (!data.length) return <EmptyChart text="No attempt quality data." />;
+  if (!data.length || data.every((entry) => !entry.Perfect && !entry.Wasted && !entry.Overtime && !entry.Confused)) {
+    return <EmptyChart text="No data yet" />;
+  }
   return (
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
