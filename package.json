@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build:offline": "node scripts/build-offline-bundle.mjs",
+    "build": "npm run build:offline && next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
