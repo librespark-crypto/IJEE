@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AttemptQualityChart,
@@ -44,7 +45,7 @@ const REVIEW_FILTERS = ["All", "Incorrect Only", "Marked for Review", "Correct",
 type ReviewFilter = (typeof REVIEW_FILTERS)[number];
 
 export function ReviewDashboard({ attemptId }: { attemptId: string }) {
-  const { ready, attempts, tests, putAttempt, settings } = useStore();
+  const { ready, attempts, tests, putAttempt, removeAttempt, settings } = useStore();
   const attempt = attempts.find((item) => item.id === attemptId);
   const test = tests.find((item) => item.id === attempt?.testId);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -128,6 +129,14 @@ export function ReviewDashboard({ attemptId }: { attemptId: string }) {
 
   const currentReviewQuestion = reviewQuestions[reviewIndex] ?? null;
 
+  const router = useRouter();
+
+  async function handleDeleteResult() {
+    if (!attempt) return;
+    await removeAttempt(attempt.id);
+    router.push("/history");
+  }
+
   async function explainWithAI(question: QuestionAnalysis) {
     if (!attempt) return;
     setBusy(true);
@@ -208,6 +217,12 @@ Give a rigorous step-by-step solution, an alternate method if one exists, the co
 
   return (
     <div className="mx-auto max-w-7xl px-3 py-6 md:px-6">
+      {evaluation.attempted === 0 ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-[3px] border-[var(--vermilion)] bg-white px-4 py-3 shadow-[4px_4px_0_var(--vermilion)]">
+          <p className="font-display text-lg text-[var(--vermilion)]">No questions attempted in this test.</p>
+          <button className="manga-btn" onClick={() => void handleDeleteResult()}>Delete this result</button>
+        </div>
+      ) : null}
       {/* Header */}
       <div className="manga-header">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -390,7 +405,7 @@ function OverviewTab({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <MetricTile label="Questions Attempted" value={`${evaluation.attempted} / ${evaluation.considered}`} />
         <MetricTile label="Positive Score" value={formatMarks(evaluation.score + evaluation.negativeMarks)} />
-        <MetricTile label="Marks Lost" value={`−${formatMarks(evaluation.negativeMarks)}`} tone="red" />
+        <MetricTile label="Marks Lost" value={evaluation.negativeMarks > 0 ? `−${formatMarks(evaluation.negativeMarks)}` : "0"} tone="red" />
         <MetricTile label="Attempt Rate" value={formatPercent(evaluation.attemptRate)} />
         <MetricTile label="Avg Time / Q" value={formatDuration(evaluation.avgTime)} />
       </div>
@@ -476,7 +491,12 @@ function PerformanceTab({ evaluation, dashboard }: { evaluation: Evaluation; das
       <div>
         <h2 className="font-display text-2xl">Performance Insights</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          {evaluation.insights.length > 0 ? evaluation.insights.map((insight) => (
+          {evaluation.attempted === 0 ? (
+            <article className="manga-card">
+              <p className="font-note text-xs uppercase tracking-wide text-[var(--vermilion)]">Empty</p>
+              <h3 className="mt-1 font-semibold">Not enough data (no questions attempted)</h3>
+            </article>
+          ) : evaluation.insights.length > 0 ? evaluation.insights.map((insight) => (
             <article key={insight.id} className={cx("manga-card", `manga-card--tone-${insight.tone}`)}>
               <p className="font-note text-xs uppercase tracking-wide text-[var(--vermilion)]">{insight.tone}</p>
               <h3 className="mt-1 font-semibold">{insight.title}</h3>
